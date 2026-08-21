@@ -23,7 +23,10 @@ public: // Constants
 		TYPE_MESH,
 	};
 
-	static inline const int MAX_TEXTURES = 32;
+	// phases/2/13-terrain3d-integration.md: control-map base/overlay widened from
+	// 5 to 6 bits (see terrain_3d_util.h's own comment on the full bit-layout
+	// change) -- 32 -> 64.
+	static inline const int MAX_TEXTURES = 64;
 	static inline const int MAX_MESHES = 256;
 
 private:

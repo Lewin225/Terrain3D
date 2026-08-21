@@ -201,49 +201,70 @@ inline Rect2 aabb2rect(const AABB &p_aabb) {
 inline float as_float(const uint32_t p_value) { return *(float *)&p_value; }
 inline uint32_t as_uint(const float p_value) { return *(uint32_t *)&p_value; }
 
-inline uint8_t get_base(const uint32_t p_pixel) { return p_pixel >> 27 & 0x1F; }
+// phases/2/13-terrain3d-integration.md: control-map bit layout widened from
+// 5-bit base/overlay (32 texture slots) to 6-bit (64 slots) -- real, measured
+// need at region_size=256 (49 in a real worst-case neighborhood) exceeded the
+// original 31-usable-slot budget. Base/overlay sat with ZERO gap against blend
+// in the original layout (bits 27-31 / 22-26 / 14-21, fully contiguous), so
+// widening them by 1 bit each required re-packing every field's offset, not
+// just extending in place -- confirmed by inventorying every real bit-shift
+// site in this file, terrain_3d_data.h, AND the GPU shaders (main.glsl,
+// auto_shader.glsl, debug_views.glsl, editor_functions.glsl all hardcode the
+// identical layout independently and must move in lockstep or rendering
+// silently decodes garbage). New layout (was -> now), widths unchanged except
+// base/overlay:
+//   base:        bits 27-31 (5) -> bits 26-31 (6)
+//   overlay:     bits 22-26 (5) -> bits 20-25 (6)
+//   blend:       bits 14-21 (8) -> bits 12-19 (8)
+//   uv_rotation: bits 10-13 (4) -> bits  8-11 (4)
+//   uv_scale:    bits  7-9  (3) -> bits  5-7  (3)
+//   hole:        bit 2           -> bit 4
+//   nav:         bit 1           -> bit 3
+//   auto:        bit 0           -> bit 2
+//   spare:       bits 3-6 (4)    -> bits 0-1 (2)
+inline uint8_t get_base(const uint32_t p_pixel) { return p_pixel >> 26 & 0x3F; }
 inline uint8_t get_base(const float p_pixel) { return get_base(as_uint(p_pixel)); }
-inline uint32_t enc_base(const uint8_t p_base) { return (p_base & 0x1F) << 27; }
+inline uint32_t enc_base(const uint8_t p_base) { return (p_base & 0x3F) << 26; }
 inline uint32_t gd_get_base(const uint32_t p_pixel) { return get_base(p_pixel); }
 inline uint32_t gd_enc_base(const uint32_t p_base) { return enc_base(p_base); }
 
-inline uint8_t get_overlay(const uint32_t p_pixel) { return p_pixel >> 22 & 0x1F; }
+inline uint8_t get_overlay(const uint32_t p_pixel) { return p_pixel >> 20 & 0x3F; }
 inline uint8_t get_overlay(const float p_pixel) { return get_overlay(as_uint(p_pixel)); }
-inline uint32_t enc_overlay(const uint8_t p_over) { return (p_over & 0x1F) << 22; }
+inline uint32_t enc_overlay(const uint8_t p_over) { return (p_over & 0x3F) << 20; }
 inline uint32_t gd_get_overlay(const uint32_t p_pixel) { return get_overlay(p_pixel); }
 inline uint32_t gd_enc_overlay(const uint32_t p_over) { return enc_overlay(p_over); }
 
-inline uint8_t get_blend(const uint32_t p_pixel) { return p_pixel >> 14 & 0xFF; }
+inline uint8_t get_blend(const uint32_t p_pixel) { return p_pixel >> 12 & 0xFF; }
 inline uint8_t get_blend(const float p_pixel) { return get_blend(as_uint(p_pixel)); }
-inline uint32_t enc_blend(const uint8_t p_blend) { return (p_blend & 0xFF) << 14; }
+inline uint32_t enc_blend(const uint8_t p_blend) { return (p_blend & 0xFF) << 12; }
 inline uint32_t gd_get_blend(const uint32_t p_pixel) { return get_blend(p_pixel); }
 inline uint32_t gd_enc_blend(const uint32_t p_blend) { return enc_blend(p_blend); }
 
-inline uint8_t get_uv_rotation(const uint32_t p_pixel) { return p_pixel >> 10 & 0xF; }
+inline uint8_t get_uv_rotation(const uint32_t p_pixel) { return p_pixel >> 8 & 0xF; }
 inline uint8_t get_uv_rotation(const float p_pixel) { return get_uv_rotation(as_uint(p_pixel)); }
-inline uint32_t enc_uv_rotation(const uint8_t p_rotation) { return (p_rotation & 0xF) << 10; }
+inline uint32_t enc_uv_rotation(const uint8_t p_rotation) { return (p_rotation & 0xF) << 8; }
 inline uint32_t gd_get_uv_rotation(const uint32_t p_pixel) { return get_uv_rotation(p_pixel); }
 inline uint32_t gd_enc_uv_rotation(const uint32_t p_rotation) { return enc_uv_rotation(p_rotation); }
 
-inline uint8_t get_uv_scale(const uint32_t p_pixel) { return p_pixel >> 7 & 0x7; }
+inline uint8_t get_uv_scale(const uint32_t p_pixel) { return p_pixel >> 5 & 0x7; }
 inline uint8_t get_uv_scale(const float p_pixel) { return get_uv_scale(as_uint(p_pixel)); }
-inline uint32_t enc_uv_scale(const uint8_t p_scale) { return (p_scale & 0x7) << 7; }
+inline uint32_t enc_uv_scale(const uint8_t p_scale) { return (p_scale & 0x7) << 5; }
 inline uint32_t gd_get_uv_scale(const uint32_t p_pixel) { return get_uv_scale(p_pixel); }
 inline uint32_t gd_enc_uv_scale(const uint32_t p_scale) { return enc_uv_scale(p_scale); }
 
-inline bool is_hole(const uint32_t p_pixel) { return (p_pixel >> 2 & 0x1) == 1; }
+inline bool is_hole(const uint32_t p_pixel) { return (p_pixel >> 4 & 0x1) == 1; }
 inline bool is_hole(const float p_pixel) { return is_hole(as_uint(p_pixel)); }
-inline uint32_t enc_hole(const bool p_hole) { return (p_hole & 0x1) << 2; }
+inline uint32_t enc_hole(const bool p_hole) { return (p_hole & 0x1) << 4; }
 inline bool gd_is_hole(const uint32_t p_pixel) { return is_hole(p_pixel); }
 
-inline bool is_nav(const uint32_t p_pixel) { return (p_pixel >> 1 & 0x1) == 1; }
+inline bool is_nav(const uint32_t p_pixel) { return (p_pixel >> 3 & 0x1) == 1; }
 inline bool is_nav(const float p_pixel) { return is_nav(as_uint(p_pixel)); }
-inline uint32_t enc_nav(const bool p_nav) { return (p_nav & 0x1) << 1; }
+inline uint32_t enc_nav(const bool p_nav) { return (p_nav & 0x1) << 3; }
 inline bool gd_is_nav(const uint32_t p_pixel) { return is_nav(p_pixel); }
 
-inline bool is_auto(const uint32_t p_pixel) { return (p_pixel & 0x1) == 1; }
+inline bool is_auto(const uint32_t p_pixel) { return (p_pixel >> 2 & 0x1) == 1; }
 inline bool is_auto(const float p_pixel) { return is_auto(as_uint(p_pixel)); }
-inline uint32_t enc_auto(const bool p_auto) { return p_auto & 0x1; }
+inline uint32_t enc_auto(const bool p_auto) { return (p_auto & 0x1) << 2; }
 inline bool gd_is_auto(const uint32_t p_pixel) { return is_auto(p_pixel); }
 
 ///////////////////////////

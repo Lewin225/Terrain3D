@@ -6,7 +6,9 @@ R"(
 //INSERT: EDITOR_NAVIGATION
 	// Show navigation
 	{
-		if(bool(floatBitsToUint(texelFetch(_control_maps, get_index_coord(floor(uv + 0.5), SKIP_PASS), 0)).r >>1u & 0x1u)) {
+		// phases/2/13-terrain3d-integration.md: control-map bit layout widened,
+		// nav bit moved 1 -> 3 -- see terrain_3d_util.h's own comment.
+		if(bool(floatBitsToUint(texelFetch(_control_maps, get_index_coord(floor(uv + 0.5), SKIP_PASS), 0)).r >>3u & 0x1u)) {
 			ALBEDO *= vec3(.5, .0, .85);
 		}
 	}
