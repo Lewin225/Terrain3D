@@ -63,6 +63,11 @@ private:
 	TypedArray<Image> _height_maps;
 	TypedArray<Image> _control_maps;
 	TypedArray<Image> _color_maps;
+	TypedArray<Image> _tex_id_a_maps;
+	TypedArray<Image> _tex_id_b_maps;
+	TypedArray<Image> _weight_a_maps;
+	TypedArray<Image> _weight_b_maps;
+	TypedArray<Image> _normal_maps;
 
 	// Editing occurs on the Image arrays above, which are converted to Texture arrays
 	// below for the shader.
@@ -75,6 +80,11 @@ private:
 	GeneratedTexture _generated_height_maps;
 	GeneratedTexture _generated_control_maps;
 	GeneratedTexture _generated_color_maps;
+	GeneratedTexture _generated_tex_id_a_maps;
+	GeneratedTexture _generated_tex_id_b_maps;
+	GeneratedTexture _generated_weight_a_maps;
+	GeneratedTexture _generated_weight_b_maps;
+	GeneratedTexture _generated_normal_maps;
 
 	// Functions
 	void _clear();
@@ -132,11 +142,21 @@ public:
 	TypedArray<Image> get_height_maps() const { return _height_maps; }
 	TypedArray<Image> get_control_maps() const { return _control_maps; }
 	TypedArray<Image> get_color_maps() const { return _color_maps; }
+	TypedArray<Image> get_tex_id_a_maps() const { return _tex_id_a_maps; }
+	TypedArray<Image> get_tex_id_b_maps() const { return _tex_id_b_maps; }
+	TypedArray<Image> get_weight_a_maps() const { return _weight_a_maps; }
+	TypedArray<Image> get_weight_b_maps() const { return _weight_b_maps; }
+	TypedArray<Image> get_normal_maps() const { return _normal_maps; }
 	TypedArray<Image> get_maps(const MapType p_map_type) const;
 	void update_maps(const MapType p_map_type = TYPE_MAX, const bool p_all_regions = true, const bool p_generate_mipmaps = false);
 	RID get_height_maps_rid() const { return _generated_height_maps.get_rid(); }
 	RID get_control_maps_rid() const { return _generated_control_maps.get_rid(); }
 	RID get_color_maps_rid() const { return _generated_color_maps.get_rid(); }
+	RID get_tex_id_a_maps_rid() const { return _generated_tex_id_a_maps.get_rid(); }
+	RID get_tex_id_b_maps_rid() const { return _generated_tex_id_b_maps.get_rid(); }
+	RID get_weight_a_maps_rid() const { return _generated_weight_a_maps.get_rid(); }
+	RID get_weight_b_maps_rid() const { return _generated_weight_b_maps.get_rid(); }
+	RID get_normal_maps_rid() const { return _generated_normal_maps.get_rid(); }
 
 	void set_pixel(const MapType p_map_type, const Vector3 &p_global_position, const Color &p_pixel);
 	Color get_pixel(const MapType p_map_type, const Vector3 &p_global_position) const;

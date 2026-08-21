@@ -25,6 +25,11 @@ void Terrain3DData::_clear() {
 	_generated_height_maps.clear();
 	_generated_control_maps.clear();
 	_generated_color_maps.clear();
+	_generated_tex_id_a_maps.clear();
+	_generated_tex_id_b_maps.clear();
+	_generated_weight_a_maps.clear();
+	_generated_weight_b_maps.clear();
+	_generated_normal_maps.clear();
 }
 
 // Structured to work with do_for_regions. Should be renamed when copy_paste is expanded
@@ -438,6 +443,21 @@ TypedArray<Image> Terrain3DData::get_maps(const MapType p_map_type) const {
 		case TYPE_COLOR:
 			return get_color_maps();
 			break;
+		case TYPE_TEX_ID_A:
+			return get_tex_id_a_maps();
+			break;
+		case TYPE_TEX_ID_B:
+			return get_tex_id_b_maps();
+			break;
+		case TYPE_WEIGHT_A:
+			return get_weight_a_maps();
+			break;
+		case TYPE_WEIGHT_B:
+			return get_weight_b_maps();
+			break;
+		case TYPE_NORMAL:
+			return get_normal_maps();
+			break;
 		default:
 			break;
 	}
@@ -471,10 +491,30 @@ void Terrain3DData::update_maps(const MapType p_map_type, const bool p_all_regio
 			case TYPE_COLOR:
 				_generated_color_maps.clear();
 				break;
+			case TYPE_TEX_ID_A:
+				_generated_tex_id_a_maps.clear();
+				break;
+			case TYPE_TEX_ID_B:
+				_generated_tex_id_b_maps.clear();
+				break;
+			case TYPE_WEIGHT_A:
+				_generated_weight_a_maps.clear();
+				break;
+			case TYPE_WEIGHT_B:
+				_generated_weight_b_maps.clear();
+				break;
+			case TYPE_NORMAL:
+				_generated_normal_maps.clear();
+				break;
 			default:
 				_generated_height_maps.clear();
 				_generated_control_maps.clear();
 				_generated_color_maps.clear();
+				_generated_tex_id_a_maps.clear();
+				_generated_tex_id_b_maps.clear();
+				_generated_weight_a_maps.clear();
+				_generated_weight_b_maps.clear();
+				_generated_normal_maps.clear();
 				_region_map_dirty = true;
 				break;
 		}
@@ -560,6 +600,86 @@ void Terrain3DData::update_maps(const MapType p_map_type, const bool p_all_regio
 		emit_signal("color_maps_changed");
 	}
 
+	// Rebuild tex id A maps if dirty
+	if (_generated_tex_id_a_maps.is_dirty()) {
+		LOG(EXTREME, "Regenerating tex id A texture array from regions");
+		_tex_id_a_maps.clear();
+		for (int i = 0; i < _region_locations.size(); i++) {
+			Vector2i region_loc = _region_locations[i];
+			Terrain3DRegion *region = get_region_ptr(region_loc);
+			if (region) {
+				_tex_id_a_maps.push_back(region->get_tex_id_a_map());
+			}
+		}
+		_generated_tex_id_a_maps.create(_tex_id_a_maps);
+		any_changed = true;
+		emit_signal("tex_id_a_maps_changed");
+	}
+
+	// Rebuild tex id B maps if dirty
+	if (_generated_tex_id_b_maps.is_dirty()) {
+		LOG(EXTREME, "Regenerating tex id B texture array from regions");
+		_tex_id_b_maps.clear();
+		for (int i = 0; i < _region_locations.size(); i++) {
+			Vector2i region_loc = _region_locations[i];
+			Terrain3DRegion *region = get_region_ptr(region_loc);
+			if (region) {
+				_tex_id_b_maps.push_back(region->get_tex_id_b_map());
+			}
+		}
+		_generated_tex_id_b_maps.create(_tex_id_b_maps);
+		any_changed = true;
+		emit_signal("tex_id_b_maps_changed");
+	}
+
+	// Rebuild weight A maps if dirty
+	if (_generated_weight_a_maps.is_dirty()) {
+		LOG(EXTREME, "Regenerating weight A texture array from regions");
+		_weight_a_maps.clear();
+		for (int i = 0; i < _region_locations.size(); i++) {
+			Vector2i region_loc = _region_locations[i];
+			Terrain3DRegion *region = get_region_ptr(region_loc);
+			if (region) {
+				_weight_a_maps.push_back(region->get_weight_a_map());
+			}
+		}
+		_generated_weight_a_maps.create(_weight_a_maps);
+		any_changed = true;
+		emit_signal("weight_a_maps_changed");
+	}
+
+	// Rebuild weight B maps if dirty
+	if (_generated_weight_b_maps.is_dirty()) {
+		LOG(EXTREME, "Regenerating weight B texture array from regions");
+		_weight_b_maps.clear();
+		for (int i = 0; i < _region_locations.size(); i++) {
+			Vector2i region_loc = _region_locations[i];
+			Terrain3DRegion *region = get_region_ptr(region_loc);
+			if (region) {
+				_weight_b_maps.push_back(region->get_weight_b_map());
+			}
+		}
+		_generated_weight_b_maps.create(_weight_b_maps);
+		any_changed = true;
+		emit_signal("weight_b_maps_changed");
+	}
+
+	// Rebuild normal maps if dirty
+	if (_generated_normal_maps.is_dirty()) {
+		LOG(EXTREME, "Regenerating normal texture array from regions");
+		_normal_maps.clear();
+		for (int i = 0; i < _region_locations.size(); i++) {
+			Vector2i region_loc = _region_locations[i];
+			Terrain3DRegion *region = get_region_ptr(region_loc);
+			if (region) {
+				_normal_maps.push_back(region->get_normal_map());
+			}
+		}
+		_generated_normal_maps.create(_normal_maps);
+		any_changed = true;
+		emit_signal("normal_maps_changed");
+	}
+
 	// If no maps have been rebuilt, update only individual regions in the array.
 	// Regions marked Edited have been changed by Terrain3DEditor::_operate_map or undo / redo processing.
 	if (!any_changed) {
@@ -581,13 +701,43 @@ void Terrain3DData::update_maps(const MapType p_map_type, const bool p_all_regio
 						_generated_color_maps.update(region->get_color_map(), region_id);
 						emit_signal("color_maps_changed");
 						break;
+					case TYPE_TEX_ID_A:
+						_generated_tex_id_a_maps.update(region->get_tex_id_a_map(), region_id);
+						emit_signal("tex_id_a_maps_changed");
+						break;
+					case TYPE_TEX_ID_B:
+						_generated_tex_id_b_maps.update(region->get_tex_id_b_map(), region_id);
+						emit_signal("tex_id_b_maps_changed");
+						break;
+					case TYPE_WEIGHT_A:
+						_generated_weight_a_maps.update(region->get_weight_a_map(), region_id);
+						emit_signal("weight_a_maps_changed");
+						break;
+					case TYPE_WEIGHT_B:
+						_generated_weight_b_maps.update(region->get_weight_b_map(), region_id);
+						emit_signal("weight_b_maps_changed");
+						break;
+					case TYPE_NORMAL:
+						_generated_normal_maps.update(region->get_normal_map(), region_id);
+						emit_signal("normal_maps_changed");
+						break;
 					default:
 						_generated_height_maps.update(region->get_height_map(), region_id);
 						_generated_control_maps.update(region->get_control_map(), region_id);
 						_generated_color_maps.update(region->get_color_map(), region_id);
+						_generated_tex_id_a_maps.update(region->get_tex_id_a_map(), region_id);
+						_generated_tex_id_b_maps.update(region->get_tex_id_b_map(), region_id);
+						_generated_weight_a_maps.update(region->get_weight_a_map(), region_id);
+						_generated_weight_b_maps.update(region->get_weight_b_map(), region_id);
+						_generated_normal_maps.update(region->get_normal_map(), region_id);
 						emit_signal("height_maps_changed");
 						emit_signal("control_maps_changed");
 						emit_signal("color_maps_changed");
+						emit_signal("tex_id_a_maps_changed");
+						emit_signal("tex_id_b_maps_changed");
+						emit_signal("weight_a_maps_changed");
+						emit_signal("weight_b_maps_changed");
+						emit_signal("normal_maps_changed");
 						break;
 				}
 			}
@@ -1170,11 +1320,21 @@ void Terrain3DData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_height_maps"), &Terrain3DData::get_height_maps);
 	ClassDB::bind_method(D_METHOD("get_control_maps"), &Terrain3DData::get_control_maps);
 	ClassDB::bind_method(D_METHOD("get_color_maps"), &Terrain3DData::get_color_maps);
+	ClassDB::bind_method(D_METHOD("get_tex_id_a_maps"), &Terrain3DData::get_tex_id_a_maps);
+	ClassDB::bind_method(D_METHOD("get_tex_id_b_maps"), &Terrain3DData::get_tex_id_b_maps);
+	ClassDB::bind_method(D_METHOD("get_weight_a_maps"), &Terrain3DData::get_weight_a_maps);
+	ClassDB::bind_method(D_METHOD("get_weight_b_maps"), &Terrain3DData::get_weight_b_maps);
+	ClassDB::bind_method(D_METHOD("get_normal_maps"), &Terrain3DData::get_normal_maps);
 	ClassDB::bind_method(D_METHOD("get_maps", "map_type"), &Terrain3DData::get_maps);
 	ClassDB::bind_method(D_METHOD("update_maps", "map_type", "all_regions", "generate_mipmaps"), &Terrain3DData::update_maps, DEFVAL(TYPE_MAX), DEFVAL(true), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_height_maps_rid"), &Terrain3DData::get_height_maps_rid);
 	ClassDB::bind_method(D_METHOD("get_control_maps_rid"), &Terrain3DData::get_control_maps_rid);
 	ClassDB::bind_method(D_METHOD("get_color_maps_rid"), &Terrain3DData::get_color_maps_rid);
+	ClassDB::bind_method(D_METHOD("get_tex_id_a_maps_rid"), &Terrain3DData::get_tex_id_a_maps_rid);
+	ClassDB::bind_method(D_METHOD("get_tex_id_b_maps_rid"), &Terrain3DData::get_tex_id_b_maps_rid);
+	ClassDB::bind_method(D_METHOD("get_weight_a_maps_rid"), &Terrain3DData::get_weight_a_maps_rid);
+	ClassDB::bind_method(D_METHOD("get_weight_b_maps_rid"), &Terrain3DData::get_weight_b_maps_rid);
+	ClassDB::bind_method(D_METHOD("get_normal_maps_rid"), &Terrain3DData::get_normal_maps_rid);
 
 	ClassDB::bind_method(D_METHOD("set_pixel", "map_type", "global_position", "pixel"), &Terrain3DData::set_pixel);
 	ClassDB::bind_method(D_METHOD("get_pixel", "map_type", "global_position"), &Terrain3DData::get_pixel);
@@ -1227,5 +1387,10 @@ void Terrain3DData::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("height_maps_changed"));
 	ADD_SIGNAL(MethodInfo("control_maps_changed"));
 	ADD_SIGNAL(MethodInfo("color_maps_changed"));
+	ADD_SIGNAL(MethodInfo("tex_id_a_maps_changed"));
+	ADD_SIGNAL(MethodInfo("tex_id_b_maps_changed"));
+	ADD_SIGNAL(MethodInfo("weight_a_maps_changed"));
+	ADD_SIGNAL(MethodInfo("weight_b_maps_changed"));
+	ADD_SIGNAL(MethodInfo("normal_maps_changed"));
 	ADD_SIGNAL(MethodInfo("maps_edited", PropertyInfo(Variant::AABB, "edited_area")));
 }

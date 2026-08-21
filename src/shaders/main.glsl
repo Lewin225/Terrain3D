@@ -61,14 +61,37 @@ uniform float _region_texel_size = 0.0009765625; // = 1./region_size
 uniform int _region_map_size = 32;
 uniform int _region_map[1024];
 uniform vec2 _region_locations[1024];
-uniform float _texture_normal_depth_array[32];
-uniform float _texture_ao_strength_array[32];
-uniform float _texture_roughness_mod_array[32];
-uniform float _texture_uv_scale_array[32];
-uniform vec2 _texture_detile_array[32];
-uniform vec4 _texture_color_array[32];
+// phases/2/14-native-terrain-texture-blend.md: real bug found via a live-play
+// report of consistent (deterministic, not random) solid-white terrain
+// patches -- these were fixed-size [32], a latent pre-existing limit dating
+// to Terrain3D's old 5-bit/32-slot control-map era, never widened when this
+// project's own control-map bit-width widenings (5->6->7 bits, 32->64->128
+// slots, phases/2/13) or this doc's real N=7 per-vertex system raised the
+// real usable texture-pool budget. Terrain3DAssets::MAX_TEXTURES is 128 and
+// the C++ side (get_texture_colors() etc., terrain_3d_material.cpp) already
+// sends a correctly-sized array up to that -- only this shader-side
+// declaration was stuck at 32. Any real texture ID >=32 (confirmed directly:
+// a real live cell's own resolved pool slots included 32 and 39) read past
+// this array's declared bounds, genuinely undefined GLSL behavior -- the
+// real, deterministic (once texture-pool resolution order became
+// deterministic via prewarm_textures()) cause of the corruption. Widened to
+// 128 to match MAX_TEXTURES exactly, not just "big enough for now."
+uniform float _texture_normal_depth_array[128];
+uniform float _texture_ao_strength_array[128];
+uniform float _texture_roughness_mod_array[128];
+uniform float _texture_uv_scale_array[128];
+uniform vec2 _texture_detile_array[128];
+uniform vec4 _texture_color_array[128];
 uniform highp sampler2DArray _height_maps : repeat_disable;
 uniform highp sampler2DArray _control_maps : repeat_disable;
+// phases/2/14-native-terrain-texture-blend.md: real per-vertex N=7 layer data,
+// always texelFetch'd at exact vertex indices (never texture()/textureLod()),
+// so filtering mode is irrelevant here -- same reasoning as _control_maps above.
+uniform highp sampler2DArray _tex_id_a_maps : repeat_disable;
+uniform highp sampler2DArray _tex_id_b_maps : repeat_disable;
+uniform highp sampler2DArray _weight_a_maps : repeat_disable;
+uniform highp sampler2DArray _weight_b_maps : repeat_disable;
+uniform highp sampler2DArray _normal_maps : repeat_disable;
 //INSERT: TEXTURE_SAMPLERS_NEAREST
 //INSERT: TEXTURE_SAMPLERS_LINEAR
 
@@ -105,6 +128,17 @@ struct material {
 	float normal_map_depth;
 	float ao_strength;
 	float total_weight;
+};
+
+// phases/2/14-native-terrain-texture-blend.md: one real texture-array sample
+// (albedo+height, normal+rough, normal depth, ao strength) for a single real
+// layer at a single corner. Composited by accumulate_material() below via
+// real sequential alpha-over, not Terrain3D's own competitive height-blend.
+struct layer_sample {
+	vec4 albedo;
+	vec4 normal_rough;
+	float normal_map_depth;
+	float ao_strength;
 };
 
 varying float v_vertex_xz_dist;
@@ -216,10 +250,54 @@ vec2 rotate_vec2(const vec2 v, const vec2 cs) {
 	return vec2(fma(cs.x, v.x,  cs.y * v.y), fma(cs.x, v.y, -cs.y * v.x));
 }
 
-// 2-4 lookups ( 2-6 with dual scaling )
+// Samples one real texture layer with Terrain3D's existing detiling/rotation/
+// projection-aligned anisotropic filtering, shared by every one of the up to
+// 7 real layers accumulate_material() below composites. Factored out of what
+// used to be two near-identical inline blocks (one per control-map texture
+// ID) so real N=7 compositing doesn't require 7x copy-pasted blocks.
+layer_sample sample_terrain_layer(const int id, const vec2 i_uv, const vec4 i_dd, const vec2 i_pos,
+			const vec2 c_cs_angle, const mat2 p_align) {
+	float id_scale = _texture_uv_scale_array[id];
+	vec4 id_dd = i_dd * id_scale;
+
+	// Detiling and Control map rotation
+	vec2 uv_center = floor(fma(i_pos, vec2(id_scale), vec2(0.5)));
+	vec2 id_detile = fma(random(uv_center), 2.0, -1.0) * _texture_detile_array[id] * TAU;
+	vec2 id_cs_angle = vec2(cos(id_detile.x), sin(id_detile.x));
+	// Apply UV rotation and shift around pivot.
+	vec2 id_uv = rotate_vec2(fma(i_uv, vec2(id_scale), -uv_center), id_cs_angle) + uv_center + id_detile.y - 0.5;
+	// Manual transpose to rotate derivatives and normals counter to uv rotation whilst also
+	// including control map rotation. avoids extra matrix op, and sin/cos calls.
+	id_cs_angle = vec2(
+		fma(id_cs_angle.x, c_cs_angle.x, -id_cs_angle.y * c_cs_angle.y),
+		fma(id_cs_angle.y, c_cs_angle.x, id_cs_angle.x * c_cs_angle.y));
+	// Align derivatives for correct anisotropic filtering
+	id_dd.xy = rotate_vec2(id_dd.xy, id_cs_angle);
+	id_dd.zw = rotate_vec2(id_dd.zw, id_cs_angle);
+
+	vec4 alb = textureGrad(_texture_array_albedo, vec3(id_uv, float(id)), id_dd.xy, id_dd.zw);
+	vec4 nrm = textureGrad(_texture_array_normal, vec3(id_uv, float(id)), id_dd.xy, id_dd.zw);
+
+	alb.rgb *= _texture_color_array[id].rgb;
+	nrm.a = clamp(nrm.a + _texture_roughness_mod_array[id], 0., 1.);
+	// Unpack and rotate normal map.
+	nrm.xyz = fma(nrm.xzy, vec3(2.0), vec3(-1.0));
+	nrm.xz = rotate_vec2(nrm.xz, id_cs_angle) * p_align;
+
+	return layer_sample(alb, nrm, _texture_normal_depth_array[id], _texture_ao_strength_array[id]);
+}
+
+// phases/2/14-native-terrain-texture-blend.md: real sequential alpha-over
+// compositing of up to 7 real layers at one corner -- ids_a/ids_b are the
+// real BTXT+ATXT texture IDs (ids_a.x is always the real BTXT base, implicit
+// weight 1.0), weights_a/weights_b are the real per-vertex VTXT opacities for
+// the 6 possible ATXT overlays, already sorted by real layer_index at import
+// time. Replaces Terrain3D's own competitive 2-texture height-blend model
+// entirely -- there is no "which id wins" logic here, just the literal
+// engine algorithm: base, then each real overlay painted over it in order.
 void accumulate_material(const vec3 base_ddx, const vec3 base_ddy, const float weight, const ivec3 index,
-			const uint control, const vec2 texture_weight, const ivec2 texture_id, const vec3 i_normal,
-			const float h, inout material mat) {
+			const ivec4 ids_a, const ivec3 ids_b, const vec4 weights_a, const vec2 weights_b,
+			const vec3 i_normal, const float h, inout material mat) {
 
 	// Index position for detiling.
 	vec2 i_pos = fma(_region_locations[index.z], vec2(_region_size), vec2(index.xy)) * _vertex_spacing;
@@ -240,114 +318,47 @@ void accumulate_material(const vec3 base_ddx, const vec3 base_ddy, const float w
 		i_dd.xy = vec2(dot(base_ddx.xz, xz), -base_ddx.y);
 		i_dd.zw = vec2(dot(base_ddy.xz, xz), -base_ddy.y);
 	}
+	// No control-map scale/rotation here -- those were properties of
+	// Terrain3D's own control-map format, not real ESM data. Real per-texture
+	// UV scale/detiling still comes from _texture_uv_scale_array/_texture_detile_array,
+	// same as before, just with no additional per-vertex rotation on top.
+	const vec2 c_cs_angle = vec2(1.0, 0.0);
 
-	// Control map scale
-	float control_scale = DECODE_SCALE(control);
-	i_dd *= control_scale;
-	i_uv *= control_scale;
-	i_pos *= control_scale;
+	int ids[7] = int[7](ids_a.x, ids_a.y, ids_a.z, ids_a.w, ids_b.x, ids_b.y, ids_b.z);
+	float layer_w[7] = float[7](1.0, weights_a.x, weights_a.y, weights_a.z, weights_a.w, weights_b.x, weights_b.y);
 
-	// Control map rotation. Must be applied seperatley from detiling to maintain UV continuity.
-	float c_angle = DECODE_ANGLE(control);
-	vec2 c_cs_angle = vec2(cos(c_angle), sin(c_angle));
-	i_uv = rotate_vec2(i_uv, c_cs_angle);
-	i_pos = rotate_vec2(i_pos, c_cs_angle);
+	vec4 accum_albedo = vec4(0.0);
+	vec4 accum_normal = vec4(0.0);
+	float accum_normal_depth = 0.0;
+	float accum_ao = 0.0;
 
-	// Blend adjustment of Higher ID from Lower ID normal map in world space.
-	float world_normal = 1.;
-	vec3 T = normalize(base_ddx), B = -normalize(base_ddy);
-	// mat3 multiply, reduced to 2x fma and 1x mult.
-	#define FAST_WORLD_NORMAL(n) fma(T, vec3(n.x), fma(B, vec3(n.z), i_normal * vec3(n.y)))
-	
-	float blend = DECODE_BLEND(control); // only used for branching.
-	float sharpness = fma(56., blend_sharpness, 8.);
+	// Layer 0 (real BTXT base) is always opaque and always present.
+	layer_sample base = sample_terrain_layer(ids[0], i_uv, i_dd, i_pos, c_cs_angle, p_align);
+	accum_albedo = base.albedo;
+	accum_normal = base.normal_rough;
+	accum_normal_depth = base.normal_map_depth;
+	accum_ao = base.ao_strength;
 
-//INSERT: DUAL_SCALING
-
-	// 1st Texture Asset ID
-	if (blend < 1.0 
-	//INSERT: DUAL_SCALING_CONDITION_0
-		) {
-		int id = texture_id[0];
-		float id_w = texture_weight[0];
-		float id_scale = _texture_uv_scale_array[id];
-		vec4 id_dd = i_dd * id_scale;
-
-		// Detiling and Control map rotation
-		vec2 uv_center = floor(fma(i_pos, vec2(id_scale), vec2(0.5)));
-		vec2 id_detile = fma(random(uv_center), 2.0, -1.0) * _texture_detile_array[id] * TAU;
-		vec2 id_cs_angle = vec2(cos(id_detile.x), sin(id_detile.x));
-		// Apply UV rotation and shift around pivot.
-		vec2 id_uv = rotate_vec2(fma(i_uv, vec2(id_scale), -uv_center), id_cs_angle) + uv_center + id_detile.y - 0.5;
-		// Manual transpose to rotate derivatives and normals counter to uv rotation whilst also
-		// including control map rotation. avoids extra matrix op, and sin/cos calls.
-		id_cs_angle = vec2(
-			fma(id_cs_angle.x, c_cs_angle.x, -id_cs_angle.y * c_cs_angle.y),
-			fma(id_cs_angle.y, c_cs_angle.x, id_cs_angle.x * c_cs_angle.y));
-		// Align derivatives for correct anisotropic filtering
-		id_dd.xy = rotate_vec2(id_dd.xy, id_cs_angle);
-		id_dd.zw = rotate_vec2(id_dd.zw, id_cs_angle);
-
-		vec4 alb = textureGrad(_texture_array_albedo, vec3(id_uv, float(id)), id_dd.xy, id_dd.zw);
-		vec4 nrm = textureGrad(_texture_array_normal, vec3(id_uv, float(id)), id_dd.xy, id_dd.zw);
-
-		alb.rgb *= _texture_color_array[id].rgb;
-		nrm.a = clamp(nrm.a + _texture_roughness_mod_array[id], 0., 1.);
-		// Unpack and rotate normal map.
-		nrm.xyz = fma(nrm.xzy, vec3(2.0), vec3(-1.0));
-		nrm.xz = rotate_vec2(nrm.xz, id_cs_angle) * p_align;
-
-//INSERT: DUAL_SCALING_MIX
-		world_normal = FAST_WORLD_NORMAL(nrm).y;
-
-		float id_weight = exp2(sharpness * log2(weight + id_w + alb.a)) * weight;
-		mat.albedo_height = fma(alb, vec4(id_weight), mat.albedo_height);
-		mat.normal_rough = fma(nrm, vec4(id_weight), mat.normal_rough);
-		mat.normal_map_depth = fma(_texture_normal_depth_array[id], id_weight, mat.normal_map_depth);
-		mat.ao_strength = fma(_texture_ao_strength_array[id], id_weight, mat.ao_strength);
-		mat.total_weight += id_weight;
+	// Real ATXT overlays 1-6, each alpha-over by its own real VTXT weight, in
+	// real authored layer_index order (already sorted at import time).
+	for (int layer = 1; layer < 7; layer++) {
+		float a = layer_w[layer];
+		if (a <= 0.0) {
+			continue;
+		}
+		layer_sample s = sample_terrain_layer(ids[layer], i_uv, i_dd, i_pos, c_cs_angle, p_align);
+		a = clamp(a, 0.0, 1.0);
+		accum_albedo = mix(accum_albedo, s.albedo, a);
+		accum_normal = mix(accum_normal, s.normal_rough, a);
+		accum_normal_depth = mix(accum_normal_depth, s.normal_map_depth, a);
+		accum_ao = mix(accum_ao, s.ao_strength, a);
 	}
 
-	// 2nd Texture Asset ID
-	if (blend > 0.0 && texture_id[1] != texture_id[0]
-//INSERT: DUAL_SCALING_CONDITION_1
-		) {
-		int id = texture_id[1];
-		float id_w = texture_weight[1];
-		float id_scale = _texture_uv_scale_array[id];
-		vec4 id_dd = i_dd * id_scale;
-
-		// Detiling and Control map rotation
-		vec2 uv_center = floor(fma(i_pos, vec2(id_scale), vec2(0.5)));
-		vec2 id_detile = _texture_detile_array[id] * fma(random(uv_center), 2.0, -1.0) * TAU;
-		vec2 id_cs_angle = vec2(cos(id_detile.x), sin(id_detile.x));
-		// Apply UV rotation and shift around pivot.
-		vec2 id_uv = rotate_vec2(fma(i_uv, vec2(id_scale), -uv_center), id_cs_angle) + uv_center + id_detile.y - 0.5;
-		// Manual transpose to rotate derivatives and normals counter to uv rotation whilst also
-		// including control map rotation. avoids extra matrix op, and sin/cos calls.
-		id_cs_angle = vec2(
-			fma(id_cs_angle.x, c_cs_angle.x, -id_cs_angle.y * c_cs_angle.y),
-			fma(id_cs_angle.y, c_cs_angle.x,  id_cs_angle.x * c_cs_angle.y));
-		// Align derivatives for correct anisotropic filtering
-		id_dd.xy = rotate_vec2(id_dd.xy, id_cs_angle);
-		id_dd.zw = rotate_vec2(id_dd.zw, id_cs_angle);
-
-		vec4 alb = textureGrad(_texture_array_albedo, vec3(id_uv, float(id)), id_dd.xy, id_dd.zw);
-		vec4 nrm = textureGrad(_texture_array_normal, vec3(id_uv, float(id)), id_dd.xy, id_dd.zw);
-		alb.rgb *= _texture_color_array[id].rgb;
-		nrm.a = clamp(nrm.a + _texture_roughness_mod_array[id], 0., 1.);
-		// Unpack and rotate normal map.
-		nrm.xyz = fma(nrm.xzy, vec3(2.0), vec3(-1.0));
-		nrm.xz = rotate_vec2(nrm.xz, id_cs_angle) * p_align;
-
-//INSERT: DUAL_SCALING_MIX
-		float id_weight = exp2(sharpness * log2(weight + id_w + alb.a * clamp(world_normal, 0., 1.))) * weight;
-		mat.albedo_height = fma(alb, vec4(id_weight), mat.albedo_height);
-		mat.normal_rough = fma(nrm, vec4(id_weight), mat.normal_rough);
-		mat.normal_map_depth = fma(_texture_normal_depth_array[id], id_weight, mat.normal_map_depth);
-		mat.ao_strength = fma(_texture_ao_strength_array[id], id_weight, mat.ao_strength);
-		mat.total_weight += id_weight;
-	}
+	mat.albedo_height = fma(accum_albedo, vec4(weight), mat.albedo_height);
+	mat.normal_rough = fma(accum_normal, vec4(weight), mat.normal_rough);
+	mat.normal_map_depth = fma(accum_normal_depth, weight, mat.normal_map_depth);
+	mat.ao_strength = fma(accum_ao, weight, mat.ao_strength);
+	mat.total_weight += weight;
 }
 
 void fragment() {
@@ -383,18 +394,26 @@ void fragment() {
 	bool bilerp = region_mip < 0.0 && region_uv.z > -1.;
 
 	// Terrain normals
+	// phases/2/14-native-terrain-texture-blend.md: real per-vertex normals,
+	// read directly from _normal_maps instead of recomputed from height
+	// differences. terrain3d_bridge.gd always populates this map at import
+	// time -- either the real authored VNML normal, or (when
+	// import_authored_normals is off, or a cell has no real VNML) the same
+	// central-difference-from-heights formula this block used to compute
+	// live, baked in once at import instead of every fragment. Encoded as
+	// (world_normal+1)/2 (Terrain3DRegion::COLOR_NORMAL_UP's own convention),
+	// decoded back here via *2-1. This also drops WORLD_NOISE3's live
+	// height-diff perturbation (an editor-only brush-preview convenience,
+	// never enabled in this project -- same real, deliberate scope cut as
+	// auto_shader/dual_scaling above).
 	vec3 index_normal[4];
 	float h[4];
-	// allows additional derivatives, eg world noise, brush previews etc
-	float u = 0.0;
-	float v = 0.0;
-	
-//INSERT: WORLD_NOISE3	
+
 	// Re-use index[] for the first lookups, skipping some math. 3 lookups
 	h[3] = texelFetch(_height_maps, index[3], 0).r; // 0 (0,0)
 	h[2] = texelFetch(_height_maps, index[2], 0).r; // 1 (1,0)
 	h[0] = texelFetch(_height_maps, index[0], 0).r; // 2 (0,1)
-	index_normal[3] = normalize(vec3(h[3] - h[2] + u, _vertex_spacing, h[3] - h[0] + v));
+	index_normal[3] = normalize(texelFetch(_normal_maps, index[3], 0).xyz * 2.0 - 1.0);
 
 	// Set flat world normal - overwritten if bilerp is true
 	vec3 w_normal = index_normal[3];
@@ -428,18 +447,13 @@ void fragment() {
 		color_map = col_map[3];
 		#endif
 
-		// 5 lookups
-		// Fetch the additional required height values for smooth normals
-		h[1] = texelFetch(_height_maps, index[1], 0).r; // 3 (1,1)
-		float h_4 = texelFetch(_height_maps, get_index_coord(index_id + offsets.yz, FRAGMENT_PASS), 0).r; // 4 (1,2)
-		float h_5 = texelFetch(_height_maps, get_index_coord(index_id + offsets.zy, FRAGMENT_PASS), 0).r; // 5 (2,1)
-		float h_6 = texelFetch(_height_maps, get_index_coord(index_id + offsets.zx, FRAGMENT_PASS), 0).r; // 6 (2,0)
-		float h_7 = texelFetch(_height_maps, get_index_coord(index_id + offsets.xz, FRAGMENT_PASS), 0).r; // 7 (0,2)
+		h[1] = texelFetch(_height_maps, index[1], 0).r; // needed by accumulate_material's h param below
 
-		// Calculate the normal for the remaining index ids.
-		index_normal[0] = normalize(vec3(h[0] - h[1] + u, _vertex_spacing, h[0] - h_7 + v));
-		index_normal[1] = normalize(vec3(h[1] - h_5 + u, _vertex_spacing, h[1] - h_4 + v));
-		index_normal[2] = normalize(vec3(h[2] - h_6 + u, _vertex_spacing, h[2] - h[1] + v));
+		// Real per-vertex normals for the remaining corners -- same
+		// texelFetch-from-_normal_maps decode as corner 3 above.
+		index_normal[0] = normalize(texelFetch(_normal_maps, index[0], 0).xyz * 2.0 - 1.0);
+		index_normal[1] = normalize(texelFetch(_normal_maps, index[1], 0).xyz * 2.0 - 1.0);
+		index_normal[2] = normalize(texelFetch(_normal_maps, index[2], 0).xyz * 2.0 - 1.0);
 
 		// Set interpolated world normal
 		w_normal =
@@ -462,77 +476,58 @@ void fragment() {
 		BINORMAL = mat3(VIEW_MATRIX) * w_binormal;
 	}
 
-	// Get index control data
-	// 1 - 4 lookups
-	uvec4 control = uvec4(floatBitsToUint(texelFetch(_control_maps, index[3], 0).r));
+	// Real per-vertex N=7 layer data -- texture IDs + blend weights, read
+	// directly from the real ESM-driven per-vertex maps (see
+	// phases/2/14-native-terrain-texture-blend.md). No bit-packing, no
+	// control-map decode: this replaces the old 2-texture competitive-blend
+	// control-map section entirely. IDs are stored normalized 0-1 (real
+	// Godot Image has no 8-bit integer format) and decoded via round(*255).
+	// 1 - 4 lookups per array, same bilerp-gated pattern as height/color above.
+	ivec4 ids_a[4];
+	ivec3 ids_b[4];
+	vec4 w_a[4];
+	vec2 w_b[4];
+
+	ids_a[3] = ivec4(round(texelFetch(_tex_id_a_maps, index[3], 0) * 255.0));
+	ids_b[3] = ivec3(round(texelFetch(_tex_id_b_maps, index[3], 0).rgb * 255.0));
+	w_a[3] = texelFetch(_weight_a_maps, index[3], 0);
+	w_b[3] = texelFetch(_weight_b_maps, index[3], 0).rg;
+
 	if (bilerp) {
-		control = uvec4(
-		floatBitsToUint(texelFetch(_control_maps, index[0], 0).r),
-		floatBitsToUint(texelFetch(_control_maps, index[1], 0).r),
-		floatBitsToUint(texelFetch(_control_maps, index[2], 0).r),
-		control[3]);
+		ids_a[0] = ivec4(round(texelFetch(_tex_id_a_maps, index[0], 0) * 255.0));
+		ids_b[0] = ivec3(round(texelFetch(_tex_id_b_maps, index[0], 0).rgb * 255.0));
+		w_a[0] = texelFetch(_weight_a_maps, index[0], 0);
+		w_b[0] = texelFetch(_weight_b_maps, index[0], 0).rg;
+
+		ids_a[1] = ivec4(round(texelFetch(_tex_id_a_maps, index[1], 0) * 255.0));
+		ids_b[1] = ivec3(round(texelFetch(_tex_id_b_maps, index[1], 0).rgb * 255.0));
+		w_a[1] = texelFetch(_weight_a_maps, index[1], 0);
+		w_b[1] = texelFetch(_weight_b_maps, index[1], 0).rg;
+
+		ids_a[2] = ivec4(round(texelFetch(_tex_id_a_maps, index[2], 0) * 255.0));
+		ids_b[2] = ivec3(round(texelFetch(_tex_id_b_maps, index[2], 0).rgb * 255.0));
+		w_a[2] = texelFetch(_weight_a_maps, index[2], 0);
+		w_b[2] = texelFetch(_weight_b_maps, index[2], 0).rg;
 	}
-
-//INSERT: AUTO_SHADER
-
-	// Texture weights
-	// Vectorised Deocode of all texture IDs, then swizzle to per index mapping.
-	// Passed to accumulate_material to avoid repeated decoding.
-	ivec4 t_id[2] = {ivec4(control >> uvec4(25u) & uvec4(0x7Fu)),
-		ivec4(control >> uvec4(18u) & uvec4(0x7Fu))};
-	ivec2 texture_ids[4] = ivec2[4](
-		ivec2(t_id[0].x, t_id[1].x),
-		ivec2(t_id[0].y, t_id[1].y),
-		ivec2(t_id[0].z, t_id[1].z),
-		ivec2(t_id[0].w, t_id[1].w));
-
-	// uninterpolated weights.
-	// phases/2/13-terrain3d-integration.md: control-map bit layout widened
-	// twice -- see terrain_3d_util.h's own comment. Blend field is now at
-	// bits 10-17 (was 12-19, was originally 14-21). This exact site was
-	// missed in the FIRST widening pass (a real bug, fixed separately) --
-	// keep it in lockstep with DECODE_BLEND above on every future change.
-	vec4 weights_id_1 = vec4(control >> uvec4(10u) & uvec4(0xFFu)) * DIV_255;
-	vec4 weights_id_0 = 1.0 - weights_id_1;
-	vec2 t_weights[4] = vec2[4](
-				vec2(weights_id_0[0], weights_id_1[0]),
-				vec2(weights_id_0[1], weights_id_1[1]),
-				vec2(weights_id_0[2], weights_id_1[2]),
-				vec2(weights_id_0[3], weights_id_1[3]));
-	// interpolated weights
-	#if CURRENT_RENDERER == RENDERER_FORWARD_PLUS
-	if (bilerp) {
-		t_weights = {vec2(0), vec2(0), vec2(0), vec2(0)};
-		weights_id_0 *= weights;
-		weights_id_1 *= weights;
-		for (int i = 0; i < 4; i++) {
-			vec2 w_0 = vec2(weights_id_0[i]);
-			vec2 w_1 = vec2(weights_id_1[i]);
-			ivec2 id_0 = texture_ids[i].xx;
-			ivec2 id_1 = texture_ids[i].yy;
-			t_weights[0] += fma(w_0, vec2(equal(texture_ids[0], id_0)), w_1 * vec2(equal(texture_ids[0], id_1)));
-			t_weights[1] += fma(w_0, vec2(equal(texture_ids[1], id_0)), w_1 * vec2(equal(texture_ids[1], id_1)));
-			t_weights[2] += fma(w_0, vec2(equal(texture_ids[2], id_0)), w_1 * vec2(equal(texture_ids[2], id_1)));
-			t_weights[3] += fma(w_0, vec2(equal(texture_ids[3], id_0)), w_1 * vec2(equal(texture_ids[3], id_1)));
-		}
-	}
-	#endif
 
 	// Struct to accumulate all texture data.
 	material mat = material(vec4(0.0), vec4(0.0), 0., 0., 0.);
 
-	// 2 - 4 lookups, 2 - 6 if dual scale texture
-	accumulate_material(base_ddx, base_ddy, weights[3], index[3], control[3], t_weights[3],
-		texture_ids[3], index_normal[3], h[3], mat);
+	// Each corner independently composites its own real up-to-7-layer stack
+	// via accumulate_material()'s sequential alpha-over, then that corner's
+	// single shaded result is blended into `mat` by the corner's own mesh
+	// interpolation weight -- same fma-accumulate pattern as before, just
+	// once per corner instead of once per corner per competitive texture ID.
+	accumulate_material(base_ddx, base_ddy, weights[3], index[3], ids_a[3], ids_b[3], w_a[3], w_b[3],
+		index_normal[3], h[3], mat);
 
-	// 6 - 12 lookups, 6 - 18 if dual scale texture
 	if (bilerp) {
-		accumulate_material(base_ddx, base_ddy, weights[2], index[2], control[2], t_weights[2],
-			texture_ids[2], index_normal[2], h[2], mat);
-		accumulate_material(base_ddx, base_ddy, weights[1], index[1], control[1], t_weights[1],
-			texture_ids[1], index_normal[1], h[1], mat);
-		accumulate_material(base_ddx, base_ddy, weights[0], index[0], control[0], t_weights[0],
-			texture_ids[0], index_normal[0], h[0], mat);
+		accumulate_material(base_ddx, base_ddy, weights[2], index[2], ids_a[2], ids_b[2], w_a[2], w_b[2],
+			index_normal[2], h[2], mat);
+		accumulate_material(base_ddx, base_ddy, weights[1], index[1], ids_a[1], ids_b[1], w_a[1], w_b[1],
+			index_normal[1], h[1], mat);
+		accumulate_material(base_ddx, base_ddy, weights[0], index[0], ids_a[0], ids_b[0], w_a[0], w_b[0],
+			index_normal[0], h[0], mat);
 	}
 
 	// normalize accumulated values back to 0.0 - 1.0 range.

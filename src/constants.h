@@ -18,6 +18,8 @@ using namespace godot;
 #define COLOR_CHECKED Color(1.f, 1.f, 1.0f, -1.0f)
 #define COLOR_NORMAL Color(0.5f, 0.5f, 1.0f, 1.0f)
 #define COLOR_CONTROL Color(as_float(enc_auto(true)), 0.f, 0.f, 1.0f)
+#define COLOR_ZERO Color(0.0f, 0.0f, 0.0f, 0.0f)
+#define COLOR_NORMAL_UP Color(0.5f, 1.0f, 0.5f, 1.0f) // world-space (0,1,0) encoded as (n+1)/2
 
 // For consistency between MSVC, gcc, clang
 #ifndef FLT_MAX

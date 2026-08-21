@@ -505,6 +505,11 @@ void Terrain3DMaterial::_update_maps() {
 	RS->material_set_param(_material, "_height_maps", data->get_height_maps_rid());
 	RS->material_set_param(_material, "_control_maps", data->get_control_maps_rid());
 	RS->material_set_param(_material, "_color_maps", data->get_color_maps_rid());
+	RS->material_set_param(_material, "_tex_id_a_maps", data->get_tex_id_a_maps_rid());
+	RS->material_set_param(_material, "_tex_id_b_maps", data->get_tex_id_b_maps_rid());
+	RS->material_set_param(_material, "_weight_a_maps", data->get_weight_a_maps_rid());
+	RS->material_set_param(_material, "_weight_b_maps", data->get_weight_b_maps_rid());
+	RS->material_set_param(_material, "_normal_maps", data->get_normal_maps_rid());
 	LOG(EXTREME, "Height map RID: ", data->get_height_maps_rid());
 	LOG(EXTREME, "Control map RID: ", data->get_control_maps_rid());
 	LOG(EXTREME, "Color map RID: ", data->get_color_maps_rid());

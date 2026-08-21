@@ -31,6 +31,21 @@ void Terrain3DRegion::set_map(const MapType p_map_type, const Ref<Image> &p_imag
 		case TYPE_COLOR:
 			set_color_map(p_image);
 			break;
+		case TYPE_TEX_ID_A:
+			set_tex_id_a_map(p_image);
+			break;
+		case TYPE_TEX_ID_B:
+			set_tex_id_b_map(p_image);
+			break;
+		case TYPE_WEIGHT_A:
+			set_weight_a_map(p_image);
+			break;
+		case TYPE_WEIGHT_B:
+			set_weight_b_map(p_image);
+			break;
+		case TYPE_NORMAL:
+			set_normal_map(p_image);
+			break;
 		default:
 			LOG(ERROR, "Requested map type is invalid");
 			break;
@@ -45,6 +60,16 @@ Ref<Image> Terrain3DRegion::get_map(const MapType p_map_type) const {
 			return get_control_map();
 		case TYPE_COLOR:
 			return get_color_map();
+		case TYPE_TEX_ID_A:
+			return get_tex_id_a_map();
+		case TYPE_TEX_ID_B:
+			return get_tex_id_b_map();
+		case TYPE_WEIGHT_A:
+			return get_weight_a_map();
+		case TYPE_WEIGHT_B:
+			return get_weight_b_map();
+		case TYPE_NORMAL:
+			return get_normal_map();
 		default:
 			LOG(ERROR, "Requested map type ", p_map_type, ", is invalid");
 			return Ref<Image>();
@@ -59,6 +84,16 @@ Image *Terrain3DRegion::get_map_ptr(const MapType p_map_type) const {
 			return *_control_map;
 		case TYPE_COLOR:
 			return *_color_map;
+		case TYPE_TEX_ID_A:
+			return *_tex_id_a_map;
+		case TYPE_TEX_ID_B:
+			return *_tex_id_b_map;
+		case TYPE_WEIGHT_A:
+			return *_weight_a_map;
+		case TYPE_WEIGHT_B:
+			return *_weight_b_map;
+		case TYPE_NORMAL:
+			return *_normal_map;
 		default:
 			LOG(ERROR, "Requested map type ", p_map_type, ", is invalid");
 			return nullptr;
@@ -74,6 +109,11 @@ void Terrain3DRegion::set_maps(const TypedArray<Image> &p_maps) {
 	set_height_map(p_maps[TYPE_HEIGHT]);
 	set_control_map(p_maps[TYPE_CONTROL]);
 	set_color_map(p_maps[TYPE_COLOR]);
+	set_tex_id_a_map(p_maps[TYPE_TEX_ID_A]);
+	set_tex_id_b_map(p_maps[TYPE_TEX_ID_B]);
+	set_weight_a_map(p_maps[TYPE_WEIGHT_A]);
+	set_weight_b_map(p_maps[TYPE_WEIGHT_B]);
+	set_normal_map(p_maps[TYPE_NORMAL]);
 }
 
 TypedArray<Image> Terrain3DRegion::get_maps() const {
@@ -82,6 +122,11 @@ TypedArray<Image> Terrain3DRegion::get_maps() const {
 	maps.push_back(_height_map);
 	maps.push_back(_control_map);
 	maps.push_back(_color_map);
+	maps.push_back(_tex_id_a_map);
+	maps.push_back(_tex_id_b_map);
+	maps.push_back(_weight_a_map);
+	maps.push_back(_weight_b_map);
+	maps.push_back(_normal_map);
 	return maps;
 }
 
@@ -114,6 +159,46 @@ void Terrain3DRegion::set_color_map(const Ref<Image> &p_map) {
 	}
 }
 
+void Terrain3DRegion::set_tex_id_a_map(const Ref<Image> &p_map) {
+	LOG(INFO, "Setting tex id A map for region: ", (_location.x != INT32_MAX) ? String(_location) : "(new)");
+	if (_region_size == 0) {
+		set_region_size((p_map.is_valid()) ? p_map->get_width() : 0);
+	}
+	_tex_id_a_map = sanitize_map(TYPE_TEX_ID_A, p_map);
+}
+
+void Terrain3DRegion::set_tex_id_b_map(const Ref<Image> &p_map) {
+	LOG(INFO, "Setting tex id B map for region: ", (_location.x != INT32_MAX) ? String(_location) : "(new)");
+	if (_region_size == 0) {
+		set_region_size((p_map.is_valid()) ? p_map->get_width() : 0);
+	}
+	_tex_id_b_map = sanitize_map(TYPE_TEX_ID_B, p_map);
+}
+
+void Terrain3DRegion::set_weight_a_map(const Ref<Image> &p_map) {
+	LOG(INFO, "Setting weight A map for region: ", (_location.x != INT32_MAX) ? String(_location) : "(new)");
+	if (_region_size == 0) {
+		set_region_size((p_map.is_valid()) ? p_map->get_width() : 0);
+	}
+	_weight_a_map = sanitize_map(TYPE_WEIGHT_A, p_map);
+}
+
+void Terrain3DRegion::set_weight_b_map(const Ref<Image> &p_map) {
+	LOG(INFO, "Setting weight B map for region: ", (_location.x != INT32_MAX) ? String(_location) : "(new)");
+	if (_region_size == 0) {
+		set_region_size((p_map.is_valid()) ? p_map->get_width() : 0);
+	}
+	_weight_b_map = sanitize_map(TYPE_WEIGHT_B, p_map);
+}
+
+void Terrain3DRegion::set_normal_map(const Ref<Image> &p_map) {
+	LOG(INFO, "Setting normal map for region: ", (_location.x != INT32_MAX) ? String(_location) : "(new)");
+	if (_region_size == 0) {
+		set_region_size((p_map.is_valid()) ? p_map->get_width() : 0);
+	}
+	_normal_map = sanitize_map(TYPE_NORMAL, p_map);
+}
+
 void Terrain3DRegion::sanitize_maps() {
 	if (_region_size == 0) { // blank region, no set_*_map has been called
 		LOG(ERROR, "Set region_size first");
@@ -122,6 +207,11 @@ void Terrain3DRegion::sanitize_maps() {
 	_height_map = sanitize_map(TYPE_HEIGHT, _height_map);
 	_control_map = sanitize_map(TYPE_CONTROL, _control_map);
 	_color_map = sanitize_map(TYPE_COLOR, _color_map);
+	_tex_id_a_map = sanitize_map(TYPE_TEX_ID_A, _tex_id_a_map);
+	_tex_id_b_map = sanitize_map(TYPE_TEX_ID_B, _tex_id_b_map);
+	_weight_a_map = sanitize_map(TYPE_WEIGHT_A, _weight_a_map);
+	_weight_b_map = sanitize_map(TYPE_WEIGHT_B, _weight_b_map);
+	_normal_map = sanitize_map(TYPE_NORMAL, _normal_map);
 }
 
 Ref<Image> Terrain3DRegion::sanitize_map(const MapType p_map_type, const Ref<Image> &p_map) const {
@@ -273,6 +363,11 @@ void Terrain3DRegion::set_data(const Dictionary &p_data) {
 	SET_IF_HAS(_height_map, "height_map");
 	SET_IF_HAS(_control_map, "control_map");
 	SET_IF_HAS(_color_map, "color_map");
+	SET_IF_HAS(_tex_id_a_map, "tex_id_a_map");
+	SET_IF_HAS(_tex_id_b_map, "tex_id_b_map");
+	SET_IF_HAS(_weight_a_map, "weight_a_map");
+	SET_IF_HAS(_weight_b_map, "weight_b_map");
+	SET_IF_HAS(_normal_map, "normal_map");
 	SET_IF_HAS(_instances, "instances");
 }
 
@@ -289,6 +384,11 @@ Dictionary Terrain3DRegion::get_data() const {
 	dict["height_map"] = _height_map;
 	dict["control_map"] = _control_map;
 	dict["color_map"] = _color_map;
+	dict["tex_id_a_map"] = _tex_id_a_map;
+	dict["tex_id_b_map"] = _tex_id_b_map;
+	dict["weight_a_map"] = _weight_a_map;
+	dict["weight_b_map"] = _weight_b_map;
+	dict["normal_map"] = _normal_map;
 	dict["instances"] = _instances;
 	return dict;
 }
@@ -312,6 +412,11 @@ Ref<Terrain3DRegion> Terrain3DRegion::duplicate(const bool p_deep) {
 		dict["height_map"] = _height_map->duplicate();
 		dict["control_map"] = _control_map->duplicate();
 		dict["color_map"] = _color_map->duplicate();
+		dict["tex_id_a_map"] = _tex_id_a_map->duplicate();
+		dict["tex_id_b_map"] = _tex_id_b_map->duplicate();
+		dict["weight_a_map"] = _weight_a_map->duplicate();
+		dict["weight_b_map"] = _weight_b_map->duplicate();
+		dict["normal_map"] = _normal_map->duplicate();
 		dict["instances"] = _instances.duplicate(true);
 		region->set_data(dict);
 	}
@@ -326,6 +431,11 @@ void Terrain3DRegion::_bind_methods() {
 	BIND_ENUM_CONSTANT(TYPE_HEIGHT);
 	BIND_ENUM_CONSTANT(TYPE_CONTROL);
 	BIND_ENUM_CONSTANT(TYPE_COLOR);
+	BIND_ENUM_CONSTANT(TYPE_TEX_ID_A);
+	BIND_ENUM_CONSTANT(TYPE_TEX_ID_B);
+	BIND_ENUM_CONSTANT(TYPE_WEIGHT_A);
+	BIND_ENUM_CONSTANT(TYPE_WEIGHT_B);
+	BIND_ENUM_CONSTANT(TYPE_NORMAL);
 	BIND_ENUM_CONSTANT(TYPE_MAX);
 
 	ClassDB::bind_method(D_METHOD("set_version", "version"), &Terrain3DRegion::set_version);
@@ -345,6 +455,16 @@ void Terrain3DRegion::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_control_map"), &Terrain3DRegion::get_control_map);
 	ClassDB::bind_method(D_METHOD("set_color_map", "map"), &Terrain3DRegion::set_color_map);
 	ClassDB::bind_method(D_METHOD("get_color_map"), &Terrain3DRegion::get_color_map);
+	ClassDB::bind_method(D_METHOD("set_tex_id_a_map", "map"), &Terrain3DRegion::set_tex_id_a_map);
+	ClassDB::bind_method(D_METHOD("get_tex_id_a_map"), &Terrain3DRegion::get_tex_id_a_map);
+	ClassDB::bind_method(D_METHOD("set_tex_id_b_map", "map"), &Terrain3DRegion::set_tex_id_b_map);
+	ClassDB::bind_method(D_METHOD("get_tex_id_b_map"), &Terrain3DRegion::get_tex_id_b_map);
+	ClassDB::bind_method(D_METHOD("set_weight_a_map", "map"), &Terrain3DRegion::set_weight_a_map);
+	ClassDB::bind_method(D_METHOD("get_weight_a_map"), &Terrain3DRegion::get_weight_a_map);
+	ClassDB::bind_method(D_METHOD("set_weight_b_map", "map"), &Terrain3DRegion::set_weight_b_map);
+	ClassDB::bind_method(D_METHOD("get_weight_b_map"), &Terrain3DRegion::get_weight_b_map);
+	ClassDB::bind_method(D_METHOD("set_normal_map", "map"), &Terrain3DRegion::set_normal_map);
+	ClassDB::bind_method(D_METHOD("get_normal_map"), &Terrain3DRegion::get_normal_map);
 	ClassDB::bind_method(D_METHOD("sanitize_maps"), &Terrain3DRegion::sanitize_maps);
 	ClassDB::bind_method(D_METHOD("sanitize_map", "map_type", "map"), &Terrain3DRegion::sanitize_map);
 	ClassDB::bind_method(D_METHOD("validate_map_size", "map"), &Terrain3DRegion::validate_map_size);
@@ -381,6 +501,11 @@ void Terrain3DRegion::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "height_map", PROPERTY_HINT_RESOURCE_TYPE, "Image", ro_flags), "set_height_map", "get_height_map");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "control_map", PROPERTY_HINT_RESOURCE_TYPE, "Image", ro_flags), "set_control_map", "get_control_map");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "color_map", PROPERTY_HINT_RESOURCE_TYPE, "Image", ro_flags), "set_color_map", "get_color_map");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tex_id_a_map", PROPERTY_HINT_RESOURCE_TYPE, "Image", ro_flags), "set_tex_id_a_map", "get_tex_id_a_map");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tex_id_b_map", PROPERTY_HINT_RESOURCE_TYPE, "Image", ro_flags), "set_tex_id_b_map", "get_tex_id_b_map");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "weight_a_map", PROPERTY_HINT_RESOURCE_TYPE, "Image", ro_flags), "set_weight_a_map", "get_weight_a_map");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "weight_b_map", PROPERTY_HINT_RESOURCE_TYPE, "Image", ro_flags), "set_weight_b_map", "get_weight_b_map");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "normal_map", PROPERTY_HINT_RESOURCE_TYPE, "Image", ro_flags), "set_normal_map", "get_normal_map");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "instances", PROPERTY_HINT_NONE, "", ro_flags), "set_instances", "get_instances");
 
 	// Double-clicking a region .res file shows what's on disk, the defaults, not in memory. So these are hidden
