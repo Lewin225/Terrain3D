@@ -23,10 +23,12 @@ public: // Constants
 		TYPE_MESH,
 	};
 
-	// phases/2/13-terrain3d-integration.md: control-map base/overlay widened from
-	// 5 to 6 bits (see terrain_3d_util.h's own comment on the full bit-layout
-	// change) -- 32 -> 64.
-	static inline const int MAX_TEXTURES = 64;
+	// phases/2/13-terrain3d-integration.md: control-map base/overlay widened
+	// twice -- 5 to 6 bits (32 -> 64), then 6 to 7 bits (64 -> 128) after true
+	// per-vertex overlay selection revealed a real whole-worldspace need of 64
+	// distinct textures, over the 62-usable-slot budget the first widening left
+	// (see terrain_3d_util.h's own comment on the full bit-layout change).
+	static inline const int MAX_TEXTURES = 128;
 	static inline const int MAX_MESHES = 256;
 
 private:

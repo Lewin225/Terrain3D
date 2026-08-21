@@ -29,18 +29,19 @@ render_mode blend_mix,depth_draw_opaque,cull_back,diffuse_burley,specular_schlic
 #define TAU_16TH -0.392699081698724 // -TAU / 16.
 
 // Inline Functions
-// phases/2/13-terrain3d-integration.md: control-map bit layout widened (base/
-// overlay 5->6 bits, 32->64 slots) -- see terrain_3d_util.h's own comment for
-// the full old->new bit-offset table. Must stay in exact lockstep with that
-// file and every other shader here that decodes/encodes this same format.
-#define DECODE_BLEND(control) float(control >> 12u & 0xFFu) * DIV_255
-#define DECODE_AUTO(control) bool(control >> 2u & 0x1u)
-#define DECODE_BASE(control) int(control >> 26u & 0x3Fu)
-#define DECODE_OVER(control) int(control >> 20u & 0x3Fu)
-#define DECODE_ANGLE(control) float(control >>8u & 0xFu) * TAU_16TH
+// phases/2/13-terrain3d-integration.md: control-map bit layout widened twice
+// (base/overlay 5->6->7 bits, 32->64->128 slots) -- see terrain_3d_util.h's
+// own comment for the full old->new bit-offset table. Must stay in exact
+// lockstep with that file and every other shader here that decodes/encodes
+// this same format.
+#define DECODE_BLEND(control) float(control >> 10u & 0xFFu) * DIV_255
+#define DECODE_AUTO(control) bool(control & 0x1u)
+#define DECODE_BASE(control) int(control >> 25u & 0x7Fu)
+#define DECODE_OVER(control) int(control >> 18u & 0x7Fu)
+#define DECODE_ANGLE(control) float(control >>6u & 0xFu) * TAU_16TH
 // This math recreates the scale value directly rather than using an 8 float const array.
-#define DECODE_SCALE(control) (0.9 - float(((control >>5u & 0x7u) + 3u) % 8u + 1u) * 0.1)
-#define DECODE_HOLE(control) bool(control >>4u & 0x1u)
+#define DECODE_SCALE(control) (0.9 - float(((control >>3u & 0x7u) + 3u) % 8u + 1u) * 0.1)
+#define DECODE_HOLE(control) bool(control >>2u & 0x1u)
 
 #if CURRENT_RENDERER == RENDERER_COMPATIBILITY
     #define fma(a, b, c) ((a) * (b) + (c))
@@ -477,8 +478,8 @@ void fragment() {
 	// Texture weights
 	// Vectorised Deocode of all texture IDs, then swizzle to per index mapping.
 	// Passed to accumulate_material to avoid repeated decoding.
-	ivec4 t_id[2] = {ivec4(control >> uvec4(26u) & uvec4(0x3Fu)),
-		ivec4(control >> uvec4(20u) & uvec4(0x3Fu))};
+	ivec4 t_id[2] = {ivec4(control >> uvec4(25u) & uvec4(0x7Fu)),
+		ivec4(control >> uvec4(18u) & uvec4(0x7Fu))};
 	ivec2 texture_ids[4] = ivec2[4](
 		ivec2(t_id[0].x, t_id[1].x),
 		ivec2(t_id[0].y, t_id[1].y),
@@ -486,19 +487,12 @@ void fragment() {
 		ivec2(t_id[0].w, t_id[1].w));
 
 	// uninterpolated weights.
-	// phases/2/13-terrain3d-integration.md: control-map bit layout widened,
-	// blend field moved 14-21 -> 12-19 -- see terrain_3d_util.h's own comment.
-	// This site was missed in the original widening pass (DECODE_BLEND above
-	// and accumulate_material()'s branch-based blend were both updated, but
-	// this second, vectorized bilinear-blend-weight decode was not) -- real
-	// bug found via a live-play report of "blocky, all-or-nothing" texture
-	// blending: this is the exact value Terrain3D uses to smoothly
-	// cross-fade between neighboring control-map pixels, so decoding the
-	// wrong bits here (2 bits into the new blend field, spilling into what's
-	// now part of the overlay-ID field) corrupted just the smoothing, not
-	// the base/overlay selection -- consistent with the reported symptom
-	// (textures still looked individually correct, just hard-edged).
-	vec4 weights_id_1 = vec4(control >> uvec4(12u) & uvec4(0xFFu)) * DIV_255;
+	// phases/2/13-terrain3d-integration.md: control-map bit layout widened
+	// twice -- see terrain_3d_util.h's own comment. Blend field is now at
+	// bits 10-17 (was 12-19, was originally 14-21). This exact site was
+	// missed in the FIRST widening pass (a real bug, fixed separately) --
+	// keep it in lockstep with DECODE_BLEND above on every future change.
+	vec4 weights_id_1 = vec4(control >> uvec4(10u) & uvec4(0xFFu)) * DIV_255;
 	vec4 weights_id_0 = 1.0 - weights_id_1;
 	vec2 t_weights[4] = vec2[4](
 				vec2(weights_id_0[0], weights_id_1[0]),
