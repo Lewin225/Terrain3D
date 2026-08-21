@@ -486,7 +486,19 @@ void fragment() {
 		ivec2(t_id[0].w, t_id[1].w));
 
 	// uninterpolated weights.
-	vec4 weights_id_1 = vec4(control >> uvec4(14u) & uvec4(0xFFu)) * DIV_255;
+	// phases/2/13-terrain3d-integration.md: control-map bit layout widened,
+	// blend field moved 14-21 -> 12-19 -- see terrain_3d_util.h's own comment.
+	// This site was missed in the original widening pass (DECODE_BLEND above
+	// and accumulate_material()'s branch-based blend were both updated, but
+	// this second, vectorized bilinear-blend-weight decode was not) -- real
+	// bug found via a live-play report of "blocky, all-or-nothing" texture
+	// blending: this is the exact value Terrain3D uses to smoothly
+	// cross-fade between neighboring control-map pixels, so decoding the
+	// wrong bits here (2 bits into the new blend field, spilling into what's
+	// now part of the overlay-ID field) corrupted just the smoothing, not
+	// the base/overlay selection -- consistent with the reported symptom
+	// (textures still looked individually correct, just hard-edged).
+	vec4 weights_id_1 = vec4(control >> uvec4(12u) & uvec4(0xFFu)) * DIV_255;
 	vec4 weights_id_0 = 1.0 - weights_id_1;
 	vec2 t_weights[4] = vec2[4](
 				vec2(weights_id_0[0], weights_id_1[0]),
