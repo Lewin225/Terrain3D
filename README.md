@@ -1,52 +1,44 @@
-![Terrain3D Logo](/doc/docs/images/terrain3d.jpg)
+# Terrain3D (GodotBryo fork)
 
-# Terrain3D
-A high performance, editable terrain system for Godot 4.
+This is a patched fork of [Terrain3D](https://github.com/TokisanGames/Terrain3D),
+maintained as a vendored git submodule for
+[GodotBryo](https://github.com/Lewin225/GodotBryo) — a clean-room Godot 4
+reimplementation of Fallout: New Vegas's Gamebryo engine. Base: upstream
+`v1.0.2-stable`.
 
+**This fork exists because GodotBryo needs real per-vertex ground-texture data
+driven entirely by authored Fallout: New Vegas ESM data (BTXT/ATXT/VTXT), not
+Terrain3D's own hand-painted control-map workflow.** Terrain3D's clipmap
+mesh/LOD/streaming/collision machinery is used as-is; only its texturing
+representation has been replaced.
 
-## Features
-* Written in C++ as a GDExtension addon, which works with official builds of Godot Engine
-* [Can be accessed](https://terrain3d.readthedocs.io/en/stable/docs/programming_languages.html) by GDScript, C#, and any language Godot supports
-* Terrains as small as 64x64m up to 65.5x65.5km (4295km^2) in non-contiguous and variable sized regions
-* Up to 32 textures
-* Up to 10 levels of detail for the terrain mesh
-* Foliage instancing, with up to 10 levels of detail, and a shadow impostor
-* Sculpting, holes, texture painting, texture detiling, painting colors and wetness
-* Imports heightmaps from [HTerrain](https://github.com/Zylann/godot_heightmap_plugin/), Gaea, World Creator, World Machine, Unity, Unreal and any tool that can export a heightmap. See [heightmaps](https://terrain3d.readthedocs.io/en/stable/docs/heightmaps.html)
+## What's changed from upstream, in order
 
+1. **Control-map texture-ID field widened 5→6→7 bits** (32→64→128 texture
+   slots). GodotBryo's real worldspace ground-texture need (measured directly
+   against the shipped game data) exceeded the original 5-bit/32-slot budget.
+2. **Real per-vertex N=7 texture-layer format**, replacing Terrain3D's
+   competitive 2-texture (base+overlay) control-map blend entirely. Adds new
+   per-region map types (`TYPE_TEX_ID_A`/`B`, `TYPE_WEIGHT_A`/`B`,
+   `TYPE_NORMAL`) and a real sequential alpha-over compositing shader path,
+   so a real cell's full authored layer stack (1 base + up to 6 real ATXT
+   overlays, matching the actual FNV ESM data) renders instead of Terrain3D's
+   own 2-layer height-blend approximation.
+3. **LTEX-identity-preserving grass support.** GodotBryo's real texture pool
+   deduplicates ground textures by DDS content (several distinct Fallout
+   `LTEX` records share one texture file) — which loses the per-`LTEX`
+   identity needed to resolve real `LTEX.GNAM` → `GRAS` grass links. This
+   patch keeps the per-vertex ID maps as unique-per-`LTEX` slots and adds a
+   small (128-entry) shader-side LUT translating an `LTEX` slot to its
+   deduplicated render-texture slot only at the point of albedo/normal
+   sampling — so the GPU texture array still benefits from dedup, but a
+   GPU-particle grass shader sampling the same per-vertex maps can still
+   recover real `LTEX` identity for density/placement filtering.
 
-## Games Using Terrain3D
+## Upstream
 
-Please see the [featured games using Terrain3D](https://terrain3d.readthedocs.io/en/latest/docs/games.html) for examples of what it can do.
-
-
-## Getting Started
-
-1. Read the [Introduction](https://terrain3d.readthedocs.io/en/stable/docs/introduction.html) to understand how this terrain system works.
-
-2. Read the [Installation & Upgrade](https://terrain3d.readthedocs.io/en/stable/docs/installation.html) instructions.
-
-3. Watch the [tutorial videos](https://terrain3d.readthedocs.io/en/stable/docs/tutorial_videos.html) and read through the documentation.
-
-4. For support, read [Getting Help](https://terrain3d.readthedocs.io/en/stable/docs/getting_help.html) and join our [Discord server](https://tokisan.com/discord).
-
-
-## Credit
-Developed for the Godot community by:
-
-|||
-|--|--|
-| **Cory Petkovsek, Tokisan Games** | [<img src="https://github.com/dmhendricks/signature-social-icons/blob/master/icons/round-flat-filled/35px/twitter.png?raw=true" width="24"/>](https://twitter.com/TokisanGames) [<img src="https://github.com/dmhendricks/signature-social-icons/blob/master/icons/round-flat-filled/35px/github.png?raw=true" width="24"/>](https://github.com/TokisanGames) [<img src="https://github.com/dmhendricks/signature-social-icons/blob/master/icons/round-flat-filled/35px/www.png?raw=true" width="24"/>](https://tokisan.com/) [<img src="https://github.com/dmhendricks/signature-social-icons/blob/master/icons/round-flat-filled/35px/discord.png?raw=true" width="24"/>](https://tokisan.com/discord) [<img src="https://github.com/dmhendricks/signature-social-icons/blob/master/icons/round-flat-filled/35px/youtube.png?raw=true" width="24"/>](https://www.youtube.com/@TokisanGames)|
-| **Roope Palmroos, Outobugi Games** | [<img src="https://github.com/dmhendricks/signature-social-icons/blob/master/icons/round-flat-filled/35px/twitter.png?raw=true" width="24"/>](https://twitter.com/outobugi) [<img src="https://github.com/dmhendricks/signature-social-icons/blob/master/icons/round-flat-filled/35px/github.png?raw=true" width="24"/>](https://github.com/outobugi) [<img src="https://github.com/dmhendricks/signature-social-icons/blob/master/icons/round-flat-filled/35px/www.png?raw=true" width="24"/>](https://outobugi.com/) [<img src="https://github.com/dmhendricks/signature-social-icons/blob/master/icons/round-flat-filled/35px/youtube.png?raw=true" width="24"/>](https://www.youtube.com/@outobugi)|
-
-And the contribution team in [AUTHORS.md](https://terrain3d.readthedocs.io/en/stable/docs/authors.html) and on the right of the github page.
-
-
-## Contributing
-
-Please see [CONTRIBUTING.md](https://github.com/TokisanGames/Terrain3D/blob/main/CONTRIBUTING.md) if you would like to help make Terrain3D the best terrain system for Godot.
-
-
-## License
-
-This addon has been released under the [MIT License](https://github.com/TokisanGames/Terrain3D/blob/main/LICENSE.txt).
+For Terrain3D's own documentation, install instructions, and general usage,
+see [the real upstream project](https://github.com/TokisanGames/Terrain3D)
+and its [readthedocs site](https://terrain3d.readthedocs.io/en/stable/). This
+fork is not a general-purpose replacement — it's shaped specifically around
+GodotBryo's own real-ESM-data-driven terrain pipeline.
