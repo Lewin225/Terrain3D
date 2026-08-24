@@ -82,6 +82,11 @@ uniform float _texture_roughness_mod_array[128];
 uniform float _texture_uv_scale_array[128];
 uniform vec2 _texture_detile_array[128];
 uniform vec4 _texture_color_array[128];
+// The real ESM LTEX slot carried by the N=7 per-vertex maps is deliberately
+// distinct from the deduplicated Terrain3D render-texture slot: LTEX.GNAM
+// grass ownership must survive even when two LTEX records share one DDS.
+// terrain3d_bridge.gd prewarms this fixed lookup deterministically.
+uniform int _ltex_to_render_slot[128];
 uniform highp sampler2DArray _height_maps : repeat_disable;
 uniform highp sampler2DArray _control_maps : repeat_disable;
 // phases/2/14-native-terrain-texture-blend.md: real per-vertex N=7 layer data,
@@ -257,12 +262,13 @@ vec2 rotate_vec2(const vec2 v, const vec2 cs) {
 // ID) so real N=7 compositing doesn't require 7x copy-pasted blocks.
 layer_sample sample_terrain_layer(const int id, const vec2 i_uv, const vec4 i_dd, const vec2 i_pos,
 			const vec2 c_cs_angle, const mat2 p_align) {
-	float id_scale = _texture_uv_scale_array[id];
+	int render_id = _ltex_to_render_slot[id];
+	float id_scale = _texture_uv_scale_array[render_id];
 	vec4 id_dd = i_dd * id_scale;
 
 	// Detiling and Control map rotation
 	vec2 uv_center = floor(fma(i_pos, vec2(id_scale), vec2(0.5)));
-	vec2 id_detile = fma(random(uv_center), 2.0, -1.0) * _texture_detile_array[id] * TAU;
+	vec2 id_detile = fma(random(uv_center), 2.0, -1.0) * _texture_detile_array[render_id] * TAU;
 	vec2 id_cs_angle = vec2(cos(id_detile.x), sin(id_detile.x));
 	// Apply UV rotation and shift around pivot.
 	vec2 id_uv = rotate_vec2(fma(i_uv, vec2(id_scale), -uv_center), id_cs_angle) + uv_center + id_detile.y - 0.5;
@@ -275,16 +281,16 @@ layer_sample sample_terrain_layer(const int id, const vec2 i_uv, const vec4 i_dd
 	id_dd.xy = rotate_vec2(id_dd.xy, id_cs_angle);
 	id_dd.zw = rotate_vec2(id_dd.zw, id_cs_angle);
 
-	vec4 alb = textureGrad(_texture_array_albedo, vec3(id_uv, float(id)), id_dd.xy, id_dd.zw);
-	vec4 nrm = textureGrad(_texture_array_normal, vec3(id_uv, float(id)), id_dd.xy, id_dd.zw);
+	vec4 alb = textureGrad(_texture_array_albedo, vec3(id_uv, float(render_id)), id_dd.xy, id_dd.zw);
+	vec4 nrm = textureGrad(_texture_array_normal, vec3(id_uv, float(render_id)), id_dd.xy, id_dd.zw);
 
-	alb.rgb *= _texture_color_array[id].rgb;
-	nrm.a = clamp(nrm.a + _texture_roughness_mod_array[id], 0., 1.);
+	alb.rgb *= _texture_color_array[render_id].rgb;
+	nrm.a = clamp(nrm.a + _texture_roughness_mod_array[render_id], 0., 1.);
 	// Unpack and rotate normal map.
 	nrm.xyz = fma(nrm.xzy, vec3(2.0), vec3(-1.0));
 	nrm.xz = rotate_vec2(nrm.xz, id_cs_angle) * p_align;
 
-	return layer_sample(alb, nrm, _texture_normal_depth_array[id], _texture_ao_strength_array[id]);
+	return layer_sample(alb, nrm, _texture_normal_depth_array[render_id], _texture_ao_strength_array[render_id]);
 }
 
 // phases/2/14-native-terrain-texture-blend.md: real sequential alpha-over
