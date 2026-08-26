@@ -10,6 +10,8 @@
 #include "logger.h"
 #include "terrain_3d_data.h"
 
+#include <algorithm>
+
 ///////////////////////////
 // Private Functions
 ///////////////////////////
@@ -268,6 +270,69 @@ Error Terrain3DData::add_region(const Ref<Terrain3DRegion> &p_region, const bool
 		update_maps(TYPE_MAX, true, false);
 		_terrain->get_instancer()->update_mmis(true);
 	}
+	return OK;
+}
+
+Error Terrain3DData::initialize_fixed_region_domain(const TypedArray<Vector2i> &p_locations) {
+	IS_INIT_MESG("Data not initialized", FAILED);
+	if (!_regions.is_empty()) {
+		LOG(ERROR, "Fixed region domain must be initialized before regions exist");
+		return ERR_ALREADY_IN_USE;
+	}
+	std::vector<Vector2i> locations;
+	locations.reserve(p_locations.size());
+	for (int i = 0; i < p_locations.size(); ++i) {
+		const Vector2i location = p_locations[i];
+		if (get_region_map_index(location) < 0 || std::find(locations.begin(), locations.end(), location) != locations.end()) {
+			LOG(ERROR, "Invalid or duplicate fixed region location: ", location);
+			return ERR_INVALID_PARAMETER;
+		}
+		locations.push_back(location);
+	}
+	std::sort(locations.begin(), locations.end(), [](const Vector2i &a, const Vector2i &b) {
+		return a.y == b.y ? a.x < b.x : a.y < b.y;
+	});
+	for (const Vector2i &location : locations) {
+		if (add_region_blank(location, false).is_null()) {
+			return FAILED;
+		}
+	}
+	update_maps(TYPE_MAX, true, false);
+	return OK;
+}
+
+Error Terrain3DData::publish_region_maps(const Vector2i &p_region_loc, const TypedArray<Image> &p_maps) {
+	IS_INIT_MESG("Data not initialized", FAILED);
+	if (p_maps.size() != TYPE_MAX) {
+		LOG(ERROR, "Expected ", TYPE_MAX, " staged maps. Received ", p_maps.size());
+		return ERR_INVALID_PARAMETER;
+	}
+
+	Ref<Terrain3DRegion> region = get_region(p_region_loc);
+	if (region.is_null() || region->is_deleted()) {
+		LOG(ERROR, "Region is outside the initialized fixed domain: ", p_region_loc);
+		return ERR_DOES_NOT_EXIST;
+	}
+	for (int i = 0; i < TYPE_MAX; ++i) {
+		Ref<Image> map = p_maps[i];
+		const Image::Format expected = i <= TYPE_CONTROL ? Image::FORMAT_RF : Image::FORMAT_RGBA8;
+		if (map.is_null() || map->get_width() != _region_size || map->get_height() != _region_size || map->get_format() != expected) {
+			LOG(ERROR, "Invalid staged map ", i, " for region ", p_region_loc);
+			return ERR_INVALID_PARAMETER;
+		}
+	}
+
+	// set_maps() validates/sanitizes every staged image before it becomes live.
+	// The data did not previously exist in Terrain3D state, so no worker may
+	// retain or mutate it after this call returns.
+	region->set_maps(p_maps);
+	region->set_edited(true);
+	region->set_modified(true);
+	region->calc_height_range();
+
+	update_maps(TYPE_MAX, false, false);
+	calc_height_range(false);
+	region->set_edited(false);
 	return OK;
 }
 
@@ -1308,6 +1373,8 @@ void Terrain3DData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_region_blankp", "global_position", "update"), &Terrain3DData::add_region_blankp, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("add_region_blank", "region_location", "update"), &Terrain3DData::add_region_blank, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("add_region", "region", "update"), &Terrain3DData::add_region, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("initialize_fixed_region_domain", "locations"), &Terrain3DData::initialize_fixed_region_domain);
+	ClassDB::bind_method(D_METHOD("publish_region_maps", "region_location", "maps"), &Terrain3DData::publish_region_maps);
 	ClassDB::bind_method(D_METHOD("remove_regionp", "global_position", "update"), &Terrain3DData::remove_regionp, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("remove_regionl", "region_location", "update"), &Terrain3DData::remove_regionl, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("remove_region", "region", "update"), &Terrain3DData::remove_region, DEFVAL(true));

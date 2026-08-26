@@ -128,6 +128,15 @@ public:
 	Ref<Terrain3DRegion> add_region_blankp(const Vector3 &p_global_position, const bool p_update = true);
 	Ref<Terrain3DRegion> add_region_blank(const Vector2i &p_region_loc, const bool p_update = true);
 	Error add_region(const Ref<Terrain3DRegion> &p_region, const bool p_update = true);
+	// Allocates the complete immutable region domain in deterministic row-major
+	// order and publishes the region map exactly once. Ordinary publication may
+	// only replace layers belonging to this domain.
+	Error initialize_fixed_region_domain(const TypedArray<Vector2i> &p_locations);
+	// Main-thread hand-off for a complete, detached Terrain3D region. `p_maps`
+	// must contain exactly TYPE_MAX immutable Images of the terrain's region
+	// size. This deliberately publishes one region atomically; it is not a
+	// per-pixel editing convenience API.
+	Error publish_region_maps(const Vector2i &p_region_loc, const TypedArray<Image> &p_maps);
 	void remove_regionp(const Vector3 &p_global_position, const bool p_update = true);
 	void remove_regionl(const Vector2i &p_region_loc, const bool p_update = true);
 	void remove_region(const Ref<Terrain3DRegion> &p_region, const bool p_update = true);
