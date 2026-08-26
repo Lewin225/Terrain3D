@@ -34,6 +34,18 @@ representation has been replaced.
    sampling — so the GPU texture array still benefits from dedup, but a
    GPU-particle grass shader sampling the same per-vertex maps can still
    recover real `LTEX` identity for density/placement filtering.
+4. **Fixed terrain-region domain and atomic eight-map publication** for the
+   Issue #19 terrain streamer. `Terrain3DData.initialize_fixed_region_domain`
+   validates a bounded set of locations, sorts it deterministically by `(y,x)`,
+   allocates canonical blank regions, and builds the region map once.
+   `publish_region_maps(location, maps)` then accepts exactly the eight staged
+   maps for an already-allocated region (height/control as `RF`; the remaining
+   maps as `RGBA8`), validates their dimensions and formats, replaces that
+   region's maps, and updates its existing array layers and height range. It
+   rejects unknown locations and never dirties or emits `region_map_changed`.
+   This keeps ordinary streaming publication from triggering Terrain3D's
+   global region-map/collision rebuild; camera-local dynamic collision remains
+   the caller's explicit responsibility.
 
 ## Upstream
 
