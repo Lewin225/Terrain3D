@@ -548,7 +548,9 @@ void Terrain3DMaterial::_update_texture_arrays() {
 			set_show_checkered(true);
 			LOG(DEBUG, "No textures, enabling checkered view");
 		}
-	} else {
+	} else if (_debug_view_checkered) {
+		// Only when it is on: set_show_checkered() recompiles the shader, and
+		// the texture list changes once per streamed texture.
 		set_show_checkered(false);
 		LOG(DEBUG, "Texture count >0: ", asset_list->get_texture_count(), ", disabling checkered view");
 	}
